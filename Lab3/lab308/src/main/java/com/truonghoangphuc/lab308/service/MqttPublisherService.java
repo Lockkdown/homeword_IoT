@@ -1,4 +1,4 @@
-package com.truonghoangphuc.lab307.service;
+package com.truonghoangphuc.lab308.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.integration.mqtt.support.MqttHeaders;
@@ -20,19 +20,13 @@ public class MqttPublisherService {
 	}
 
     public void publish(String message) {
-		publish(defaultTopic, message);
-    }
-
-	public void publish(String topic, String message) {
-		if (!StringUtils.hasText(topic)) {
-			throw new IllegalArgumentException("topic must not be blank");
-		}
 		if (!StringUtils.hasText(message)) {
 			throw new IllegalArgumentException("message must not be blank");
 		}
-		mqttOutboundChannel.send(
-				MessageBuilder.withPayload(message)
-						.setHeader(MqttHeaders.TOPIC, topic)
-						.build());
-	}
+        mqttOutboundChannel.send(
+            MessageBuilder.withPayload(message)
+                .setHeader(MqttHeaders.TOPIC, defaultTopic)
+                .build()
+        );
+    }
 }
