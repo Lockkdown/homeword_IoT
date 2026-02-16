@@ -1,0 +1,12 @@
+services:
+  lab308:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Lab308
+    ports:
+      - "8080:8080"
+    environment:
+      - mqtt.broker-url=tcp://host.docker.internal:1883
+      - mqtt.topic=/test/topic
+    restart: unless-stopped
