@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab309-postgres
+    environment:
+      POSTGRES_DB: lab309db
+      POSTGRES_USER: lab309user
+      POSTGRES_PASSWORD: lab309pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab309user -d lab309db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: lab309-app
+    ports:
+      - "8080:8080"
+    environment:
+      # MQTT - kết nối tới EMQX chạy trên host machine
+      MQTT_BROKER_URL: ws://host.docker.internal:8083/mqtt
+      MQTT_CLIENT_ID: lab309-publisher
+      MQTT_TOPIC: /test/topic
+      # PostgreSQL - kết nối tới service postgres trong compose network
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/lab309db
+      SPRING_DATASOURCE_USERNAME: lab309user
+      SPRING_DATASOURCE_PASSWORD: lab309pass
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
