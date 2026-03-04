@@ -1,0 +1,7 @@
+# Flutter-specific build artifacts
+build/
+.dart_tool/
+.idea/
+android/
+ios/
+*.iml

@@ -1,0 +1,15 @@
+target
+.git
+.gitignore
+.idea
+*.iml
+# Flutter build artifacts (lớn, không cần trong build context)
+android
+ios
+build
+.dart_tool
+# Frontend subfolder không cần trong Java build
+lab311-frontend/node_modules
+# Các file thừa
+README.md
+analysis_options.yaml

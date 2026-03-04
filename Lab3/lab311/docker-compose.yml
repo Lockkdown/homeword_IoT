@@ -1,0 +1,54 @@
+services:
+  # ─── PostgreSQL ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab311-postgres
+    environment:
+      POSTGRES_DB: lab311db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "1"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lab311db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Spring Boot Backend ───────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lab311-backend
+    ports:
+      - "8080:8080"
+    environment:
+      # PostgreSQL - trỏ tới service postgres trong compose network
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/lab311db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: "1"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
+      # MQTT - trỏ tới EMQX trên host machine
+      MQTT_BROKER_URL: tcp://host.docker.internal:1883
+      MQTT_CLIENT_ID: lab311-docker-client
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─── Flutter Web Frontend ──────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: lab311-frontend/Dockerfile
+    container_name: lab311-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
