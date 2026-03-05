@@ -3,11 +3,13 @@ import axios from 'axios';
 import {
   Box, Button, Card, CardContent, Container, Divider,
   TextField, Typography, Dialog, DialogTitle,
-  DialogContent, DialogActions
+  DialogContent, DialogActions, CircularProgress, Chip,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Alert
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 function App() {
   const [devices, setDevices] = useState([]);
@@ -16,6 +18,8 @@ function App() {
   const [telemetry, setTelemetry] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [telemetryError, setTelemetryError] = useState(null);
 
   useEffect(() => {
     fetchDevices();
@@ -46,15 +50,33 @@ function App() {
   };
 
   const fetchTelemetry = async (deviceId) => {
-    const res = await axios.get(`http://localhost:8080/telemetry/${deviceId}`);
-    return res.data;
+    setTelemetryLoading(true);
+    setTelemetryError(null);
+    try {
+      const res = await axios.get(`http://localhost:8080/telemetry/${deviceId}`);
+      setTelemetry(res.data);
+    } catch (err) {
+      setTelemetryError('Không thể tải dữ liệu. Vui lòng thử lại.');
+      setTelemetry([]);
+    } finally {
+      setTelemetryLoading(false);
+    }
   };
 
   const handleViewTelemetry = async (device) => {
-    const data = await fetchTelemetry(device.id);
-    setTelemetry(data);
     setSelectedDevice(device);
     setOpenDialog(true);
+    await fetchTelemetry(device.id);
+  };
+
+  const handleRefreshTelemetry = async () => {
+    if (selectedDevice) await fetchTelemetry(selectedDevice.id);
+  };
+
+  const handleCloseDialog = () => {
+    setOpenDialog(false);
+    setTelemetry([]);
+    setTelemetryError(null);
   };
 
   return (
@@ -134,22 +156,74 @@ function App() {
 
       {/* Dialog hiển thị telemetry */}
       {selectedDevice && (
-        <Dialog open={openDialog} onClose={() => setOpenDialog(false)} fullWidth maxWidth="sm">
-          <DialogTitle>Telemetry - {selectedDevice.name}</DialogTitle>
-          <DialogContent dividers>
-            {telemetry.length === 0 ? (
-              <Typography>Không có dữ liệu</Typography>
+        <Dialog open={openDialog} onClose={handleCloseDialog} fullWidth maxWidth="md">
+          <DialogTitle>
+            <Box display="flex" alignItems="center" justifyContent="space-between">
+              <Box display="flex" alignItems="center" gap={1}>
+                <VisibilityIcon fontSize="small" />
+                <span>Telemetry — {selectedDevice.name}</span>
+                {!telemetryLoading && !telemetryError && (
+                  <Chip
+                    label={`${telemetry.length} bản ghi`}
+                    size="small"
+                    color={telemetry.length > 0 ? 'primary' : 'default'}
+                  />
+                )}
+              </Box>
+              <Button
+                size="small"
+                startIcon={<RefreshIcon />}
+                onClick={handleRefreshTelemetry}
+                disabled={telemetryLoading}
+              >
+                Refresh
+              </Button>
+            </Box>
+          </DialogTitle>
+
+          <DialogContent dividers sx={{ minHeight: 200 }}>
+            {telemetryLoading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" minHeight={150}>
+                <CircularProgress />
+              </Box>
+            ) : telemetryError ? (
+              <Alert severity="error">{telemetryError}</Alert>
+            ) : telemetry.length === 0 ? (
+              <Alert severity="info">Chưa có dữ liệu telemetry cho thiết bị này.</Alert>
             ) : (
-              telemetry.map((t, i) => (
-                <Box key={i} sx={{ mb: 1 }}>
-                  <Typography><b>Giá trị:</b> {t.value}</Typography>
-                  <Typography variant="caption" color="text.secondary">{t.timestamp}</Typography>
-                </Box>
-              ))
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ backgroundColor: '#f0f4ff' }}>
+                      <TableCell><b>#</b></TableCell>
+                      <TableCell><b>Giá trị (Value)</b></TableCell>
+                      <TableCell><b>Thời gian (Timestamp)</b></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {telemetry.map((t, i) => (
+                      <TableRow key={i} hover>
+                        <TableCell>{i + 1}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontFamily="monospace">
+                            {t.payload}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="text.secondary">
+                            {new Date(t.timestamp).toLocaleString('vi-VN')}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             )}
           </DialogContent>
+
           <DialogActions>
-            <Button onClick={() => setOpenDialog(false)}>Đóng</Button>
+            <Button onClick={handleCloseDialog} color="inherit">Đóng</Button>
           </DialogActions>
         </Dialog>
       )}

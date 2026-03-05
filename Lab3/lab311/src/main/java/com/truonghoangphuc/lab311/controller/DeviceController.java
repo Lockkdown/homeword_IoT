@@ -1,7 +1,9 @@
 package com.truonghoangphuc.lab311.controller;
 
 import com.truonghoangphuc.lab311.model.Device;
+import com.truonghoangphuc.lab311.model.Telemetry;
 import com.truonghoangphuc.lab311.repository.DeviceRepository;
+import com.truonghoangphuc.lab311.repository.TelemetryRepository;
 import com.truonghoangphuc.lab311.service.MqttPublisherService;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,8 @@ public class DeviceController {
     private MqttPublisherService mqttPublisherService;
     @Autowired
     private MqttPahoMessageDrivenChannelAdapter mqttAdapter;
+    @Autowired
+    private TelemetryRepository telemetryRepository;
 
     @GetMapping
     public List<Device> getAllDevices() {
@@ -36,7 +40,15 @@ public class DeviceController {
     public String controlDevice(@PathVariable Long id, @RequestBody String payload) {
         Device device = deviceRepository.findById(id).orElse(null);
         if (device != null) {
+            // Publish MQTT
             mqttPublisherService.publish(device.getTopic(), payload);
+
+            // Lưu telemetry trực tiếp với đúng deviceId
+            Telemetry telemetry = new Telemetry();
+            telemetry.setDeviceId(id);
+            telemetry.setPayload(payload);
+            telemetryRepository.save(telemetry);
+
             return "Published to " + device.getTopic();
         }
         return "Device not found";
