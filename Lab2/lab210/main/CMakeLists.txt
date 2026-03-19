@@ -1,3 +1,3 @@
-idf_component_register(SRCS "hello_world_main.c"
-                       PRIV_REQUIRES spi_flash esp_wifi esp_event nvs_flash esp_netif mqtt lwip protocol_examples_common
-                       INCLUDE_DIRS "")
+idf_component_register(SRCS "app_main.c"
+                    PRIV_REQUIRES mqtt nvs_flash esp_netif esp_driver_gpio
+                    INCLUDE_DIRS ".")
