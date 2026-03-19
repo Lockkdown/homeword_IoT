@@ -1,19 +1,13 @@
-menu "Example Connection Configuration"
-    config EXAMPLE_WIFI_SSID
-        string "WiFi SSID"
-        default "myssid"
-        help
-            SSID (network name) for the example to connect to.
+menu "Example Configuration"
 
-    config EXAMPLE_WIFI_PASSWORD
-        string "WiFi Password"
-        default "mypassword"
-        help
-            WiFi password (WPA or WPA2) for the example to use.
-
-    config EXAMPLE_BROKER_URL
+    config BROKER_URL
         string "Broker URL"
-        default "mqtt://192.168.1.100:1883"
+        default "mqtt://mqtt.eclipseprojects.io"
         help
-            URL of the MQTT broker (e.g. mqtt://192.168.1.100:1883)
+            URL of the broker to connect to
+
+    config BROKER_URL_FROM_STDIN
+        bool
+        default y if BROKER_URL = "FROM_STDIN"
+
 endmenu

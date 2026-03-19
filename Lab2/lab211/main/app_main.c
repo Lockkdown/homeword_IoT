@@ -18,9 +18,9 @@
 #include "mqtt_client.h"
 
 static const char *TAG = "MQTT_EXAMPLE";
-#define ESP_WIFI_SSID "Lockdown"
-#define ESP_WIFI_PASS "88888888"
-#define ESP_BROKER_IP "mqtt://10.86.107.184:1883" //mqtt://192.168.1.4:1883
+#define ESP_WIFI_SSID "Redmi Note 3 Pro"
+#define ESP_WIFI_PASS "nguyen3n2402"
+#define ESP_BROKER_IP "mqtt://10.98.121.184:1883" //mqtt://192.168.1.4:1883
 uint32_t MQTT_CONNECTED = 0;
 static void mqtt_app_start(void);
 
