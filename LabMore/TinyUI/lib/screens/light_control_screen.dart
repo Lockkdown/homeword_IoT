@@ -52,9 +52,10 @@ class _LightControlScreenState extends State<LightControlScreen> {
     // Exact logical size and positions from Figma
     // OFF and ON low: 280x280 at (67, 164)
     // ON high: 282x282 at (58, 163)
-    final double size = _isOn ? 280.0 + (282.0 - 280.0) * _intensity : 280.0;
-    final double left = _isOn ? 67.0 - (67.0 - 58.0) * _intensity : 67.0;
-    final double top = _isOn ? 164.0 - (164.0 - 163.0) * _intensity : 164.0;
+    final bool effectiveOn = _isOn && _intensity > 0.0;
+    final double size = effectiveOn ? 280.0 + (282.0 - 280.0) * _intensity : 280.0;
+    final double left = effectiveOn ? 67.0 - (67.0 - 58.0) * _intensity : 67.0;
+    final double top = effectiveOn ? 164.0 - (164.0 - 163.0) * _intensity : 164.0;
 
     // Blur radius and colors based on the actual Figma SVGs:
     // OFF: black, opacity 0.25, blur 52
@@ -63,7 +64,9 @@ class _LightControlScreenState extends State<LightControlScreen> {
     final Color color;
     final double blurRadius;
 
-    if (!_isOn) {
+    final bool effectivelyOff = !_isOn || _intensity == 0.0;
+
+    if (effectivelyOff) {
       color = Colors.black.withValues(alpha: 0.25);
       blurRadius = 52.0;
     } else {
@@ -111,8 +114,8 @@ class _LightControlScreenState extends State<LightControlScreen> {
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 400),
         child: Image.asset(
-          _isOn ? 'assets/images/lamp_on.png' : 'assets/images/lamp_off.png',
-          key: ValueKey(_isOn),
+          (_isOn && _intensity > 0.0) ? 'assets/images/lamp_on.png' : 'assets/images/lamp_off.png',
+          key: ValueKey(_isOn && _intensity > 0.0),
           width: 199,
           height: 327,
           fit: BoxFit.cover,
@@ -275,7 +278,7 @@ class _LightControlScreenState extends State<LightControlScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const SizedBox(width: 28),
+                  const SizedBox(width: 16),
                   _buildBulbIcon(dim: true),
                   Expanded(
                     child: SliderTheme(
@@ -288,6 +291,7 @@ class _LightControlScreenState extends State<LightControlScreen> {
                         ),
                         overlayColor: Colors.white.withValues(alpha: 0.2),
                         trackHeight: 2,
+                        trackShape: const _NoHorizontalPaddingTrackShape(),
                       ),
                       child: Slider(
                         value: _intensity,
@@ -300,7 +304,7 @@ class _LightControlScreenState extends State<LightControlScreen> {
                     ),
                   ),
                   _buildBulbIcon(dim: false),
-                  const SizedBox(width: 28),
+                  const SizedBox(width: 16),
                 ],
               ),
             ],
@@ -321,6 +325,29 @@ class _LightControlScreenState extends State<LightControlScreen> {
         width: 34,
         height: 34,
       ),
+    );
+  }
+}
+
+class _NoHorizontalPaddingTrackShape extends RoundedRectSliderTrackShape {
+  const _NoHorizontalPaddingTrackShape();
+
+  @override
+  Rect getPreferredRect({
+    required RenderBox parentBox,
+    Offset offset = Offset.zero,
+    required SliderThemeData sliderTheme,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+  }) {
+    final double trackHeight = sliderTheme.trackHeight ?? 2.0;
+    final double trackTop =
+        offset.dy + (parentBox.size.height - trackHeight) / 2;
+    return Rect.fromLTWH(
+      offset.dx,
+      trackTop,
+      parentBox.size.width,
+      trackHeight,
     );
   }
 }
