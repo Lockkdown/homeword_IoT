@@ -63,6 +63,14 @@ class MqttService {
     return _publish(topicBrightness, brightness.toString());
   }
 
+  // ── Relay – LED xanh module relay (GPIO 5)
+  Future<bool> publishRelayCommand(bool isOn) =>
+      _publish('tiny/relay/command', isOn ? 'ON' : 'OFF');
+
+  // ── LED Bulb 5W AC (GPIO 5)
+  Future<bool> publishLedCommand(bool isOn) =>
+      _publish('tiny/led/command', isOn ? 'ON' : 'OFF');
+
   Future<bool> _publish(String topic, String payload) async {
     if (!isConnected && !await connect()) {
       connectionStatus.value = false;
@@ -80,7 +88,6 @@ class MqttService {
   }
 
   void dispose() {
-    connectionStatus.dispose();
     _client.disconnect();
   }
 }

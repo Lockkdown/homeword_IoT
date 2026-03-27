@@ -2,26 +2,12 @@ menu "Example Configuration"
 
     config BROKER_URL
         string "Broker URL"
-        default "mqtt://192.168.1.58"
+        default "mqtt://mqtt.eclipseprojects.io"
         help
-            URL of the MQTT broker to connect to
+            URL of the broker to connect to
 
     config BROKER_URL_FROM_STDIN
         bool
         default y if BROKER_URL = "FROM_STDIN"
-
-    config LIGHT_GPIO_PIN
-        int "Light GPIO Pin"
-        default 5
-        help
-            GPIO pin number connected to the LED/light.
-            Default is GPIO 5 (built-in LED on ESP32-C3-DevKitM-1).
-
-    config LIGHT_ACTIVE_LOW
-        bool "Relay active low"
-        default y
-        help
-            Set this to enabled when the relay turns on when the GPIO output is LOW.
-            Disable it if your relay turns on when the GPIO output is HIGH.
 
 endmenu

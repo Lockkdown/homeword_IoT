@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/light_control_screen.dart';
+import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +27,7 @@ class TinyUIApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      home: const LightControlScreen(),
+      home: const HomeScreen(),
     );
   }
 }

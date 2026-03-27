@@ -22,6 +22,7 @@ class _LightControlScreenState extends State<LightControlScreen> {
     _mqtt.connect();
   }
 
+  @override
   void dispose() {
     _mqtt.dispose();
     super.dispose();
@@ -49,7 +50,7 @@ class _LightControlScreenState extends State<LightControlScreen> {
 
     setState(() => _isPublishing = true);
 
-    final commandSent = await _mqtt.publishCommand(nextValue);
+    final commandSent = await _mqtt.publishLedCommand(nextValue);
     if (!commandSent) {
       if (mounted) {
         setState(() => _isPublishing = false);
