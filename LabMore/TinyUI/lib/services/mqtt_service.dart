@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
@@ -55,12 +57,7 @@ class MqttService {
   static const String topicBrightness = 'tiny/light/brightness';
 
   // Power topics
-  static const String topicPowerVoltage = 'tiny/power/voltage';
-  static const String topicPowerCurrent = 'tiny/power/current';
-  static const String topicPowerWatts = 'tiny/power/watts';
-  static const String topicPowerEnergy = 'tiny/power/energy';
-  static const String topicPowerFreq = 'tiny/power/frequency';
-  static const String topicPowerPf = 'tiny/power/pf';
+  static const String topicTelemetry = 'tiny/telemetry';
 
   // Relay topics
   static const String topicRelayCommand = 'tiny/relay/command';
@@ -110,12 +107,7 @@ class MqttService {
 
   void _subscribeToTopics() {
     // Subscribe power topics
-    _client.subscribe(topicPowerVoltage, MqttQos.atMostOnce);
-    _client.subscribe(topicPowerCurrent, MqttQos.atMostOnce);
-    _client.subscribe(topicPowerWatts, MqttQos.atMostOnce);
-    _client.subscribe(topicPowerEnergy, MqttQos.atMostOnce);
-    _client.subscribe(topicPowerFreq, MqttQos.atMostOnce);
-    _client.subscribe(topicPowerPf, MqttQos.atMostOnce);
+    _client.subscribe(topicTelemetry, MqttQos.atMostOnce);
 
     // Subscribe relay state (retained)
     _client.subscribe(topicRelayState, MqttQos.atMostOnce);
@@ -132,23 +124,20 @@ class MqttService {
       final value = String.fromCharCodes(payload);
 
       switch (topic) {
-        case topicPowerVoltage:
-          powerMetrics.value.update(voltage: double.tryParse(value) ?? 0);
-          break;
-        case topicPowerCurrent:
-          powerMetrics.value.update(current: double.tryParse(value) ?? 0);
-          break;
-        case topicPowerWatts:
-          powerMetrics.value.update(power: double.tryParse(value) ?? 0);
-          break;
-        case topicPowerEnergy:
-          powerMetrics.value.update(energy: double.tryParse(value) ?? 0);
-          break;
-        case topicPowerFreq:
-          powerMetrics.value.update(frequency: double.tryParse(value) ?? 0);
-          break;
-        case topicPowerPf:
-          powerMetrics.value.update(powerFactor: double.tryParse(value) ?? 0);
+        case topicTelemetry:
+          try {
+            final json = jsonDecode(value);
+            powerMetrics.value.update(
+              voltage: (json['voltage'] as num?)?.toDouble(),
+              current: (json['current'] as num?)?.toDouble(),
+              power: (json['power'] as num?)?.toDouble(),
+              energy: (json['energy'] as num?)?.toDouble(),
+              frequency: (json['frequency'] as num?)?.toDouble(),
+              powerFactor: (json['power_factor'] as num?)?.toDouble(),
+            );
+          } catch (e) {
+            debugPrint('[MQTT] Parse telemetry error: $e');
+          }
           break;
         case topicRelayState:
           final on = value.trim().toUpperCase() == 'ON';

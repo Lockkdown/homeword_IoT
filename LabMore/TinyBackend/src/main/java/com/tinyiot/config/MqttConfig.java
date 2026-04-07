@@ -67,14 +67,9 @@ public class MqttConfig {
                 "tiny-backend-inbound",
                 mqttClientFactory,
                 MqttTelemetryService.T_RELAY_STATE,
-                MqttTelemetryService.T_V,
-                MqttTelemetryService.T_A,
-                MqttTelemetryService.T_W,
-                MqttTelemetryService.T_E,
-                MqttTelemetryService.T_F,
-                MqttTelemetryService.T_PF
+                MqttTelemetryService.T_TELEMETRY
         );
-        adapter.setQos(1, 1, 1, 1, 1, 1, 1);
+        adapter.setQos(1, 1);
         adapter.setOutputChannel(mqttInboundChannel);
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());

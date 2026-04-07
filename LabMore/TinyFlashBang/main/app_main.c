@@ -71,13 +71,11 @@ static bool s_relay_state = false;  /* false=OFF, true=ON */
 
 /* Forward declarations */
 static void relay_set(bool on);
+static void relay_publish_state(void);
 
 /* Physical switch variables */
-static esp_timer_handle_t s_debounce_timer = NULL;
-static volatile uint32_t s_last_isr_time = 0;
 static uint32_t s_last_valid_toggle_time = 0;
 static int s_toggle_count = 0;
-static int s_last_switch_level = -1;
 
 /* ── Reset/Erase NVS ────────────────────────────────────────── */
 static void erase_wifi_and_restart(void)
@@ -88,51 +86,39 @@ static void erase_wifi_and_restart(void)
 }
 
 /* ── Physical Switch functions ──────────────────────────────── */
-static void debounce_timer_callback(void* arg)
+static void button_task(void *arg)
 {
-    int current_level = gpio_get_level(TOUCH_GPIO);
-    
-    /* Chống nhiễu: chỉ xử lý khi trạng thái công tắc thực sự thay đổi */
-    if (current_level != s_last_switch_level) {
-        s_last_switch_level = current_level;
-        
-        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000); /* ms */
-        
-        /* Factory Reset: Bật/tắt liên tục 5 lần (mỗi lần cách nhau < 1.5s) */
-        if (now - s_last_valid_toggle_time < 1500) {
-            s_toggle_count++;
-            if (s_toggle_count >= 5) {
-                ESP_LOGW(TAG, "5 RAPID TOGGLES DETECTED -> Factory Reset");
-                erase_wifi_and_restart();
-                return;
-            }
-        } else {
-            s_toggle_count = 1;
-        }
-        s_last_valid_toggle_time = now;
-        
-        /* Bật/tắt Relay đảo trạng thái hiện tại (Công tắc bập bênh 2 chiều) */
-        s_relay_state = !s_relay_state;
-        relay_set(s_relay_state);
-        
-        /* Báo trạng thái lên App ngay lập tức */
-        if (s_client) {
-            esp_mqtt_client_publish(s_client, TOPIC_RELAY_STATE,
-                                   s_relay_state ? "ON" : "OFF", 0, 0, 0);
-        }
-        
-        ESP_LOGI(TAG, "Physical switch toggled: relay %s", s_relay_state ? "ON" : "OFF");
-    }
-}
+    int last_state = gpio_get_level(TOUCH_GPIO);
+    while (1) {
+        int current_state = gpio_get_level(TOUCH_GPIO);
+        if (current_state != last_state) {
+            vTaskDelay(pdMS_TO_TICKS(50)); // Debounce 50ms
+            current_state = gpio_get_level(TOUCH_GPIO);
+            if (current_state != last_state) {
+                
+                /* Factory Reset: Bật/tắt liên tục 5 lần (mỗi lần cách nhau < 1.5s) */
+                uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+                if (now - s_last_valid_toggle_time < 1500) {
+                    s_toggle_count++;
+                    if (s_toggle_count >= 5) {
+                        ESP_LOGW(TAG, "5 RAPID TOGGLES DETECTED -> Factory Reset");
+                        erase_wifi_and_restart();
+                    }
+                } else {
+                    s_toggle_count = 1;
+                }
+                s_last_valid_toggle_time = now;
 
-static IRAM_ATTR void touch_isr_handler(void* arg)
-{
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000); /* ms */
-    /* Tránh ngắt liên tục do nhiễu cơ học (bounce) */
-    if (now - s_last_isr_time > 50) {
-        s_last_isr_time = now;
-        /* Khởi động timer để đọc trạng thái ổn định sau 50ms */
-        esp_timer_start_once(s_debounce_timer, 50000); 
+                /* Bật/tắt Relay đảo trạng thái hiện tại */
+                s_relay_state = !s_relay_state;
+                relay_set(s_relay_state);
+                relay_publish_state();
+                
+                last_state = current_state;
+                vTaskDelay(pdMS_TO_TICKS(300)); // Tránh nhiễu sau khi chuyển trạng thái
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20)); // Polling mỗi 20ms
     }
 }
 
@@ -182,29 +168,17 @@ static void relay_gpio_init(void)
 /* ── Touch GPIO init ─────────────────────────────────────────── */
 static void touch_gpio_init(void)
 {
-    /* Create debounce timer */
-    esp_timer_create_args_t timer_args = {
-        .callback = &debounce_timer_callback,
-        .name = "touch_debounce"
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_debounce_timer));
-    
-    /* Configure physical switch GPIO as input with interrupt */
+    /* Configure physical switch GPIO as input */
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << TOUCH_GPIO),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_ANYEDGE,  /* Kích hoạt khi bật và cả khi tắt */
+        .intr_type    = GPIO_INTR_DISABLE,  /* Dùng polling task thay vì ngắt */
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
     
-    /* Install ISR service and add handler */
-    ESP_ERROR_CHECK(gpio_install_isr_service(0));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_GPIO, touch_isr_handler, NULL));
-    
-    s_last_switch_level = gpio_get_level(TOUCH_GPIO);
-    ESP_LOGI(TAG, "Physical Switch GPIO initialized: %d", TOUCH_GPIO);
+    ESP_LOGI(TAG, "Physical Switch GPIO initialized (Polling): %d", TOUCH_GPIO);
 }
 
 /* ── Relay state sync ─────────────────────────────────────────── */
@@ -430,33 +404,24 @@ static void pzem_task(void *pvParam)
                 continue;
             }
             
-            char buf[32];
-            
-            snprintf(buf, sizeof(buf), "%.1f", voltage);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_VOLTAGE, buf, 0, 1, 0);
-            
-            snprintf(buf, sizeof(buf), "%.3f", current);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_CURRENT, buf, 0, 1, 0);
-            
-            snprintf(buf, sizeof(buf), "%.1f", power);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_WATTS, buf, 0, 1, 0);
-            
-            snprintf(buf, sizeof(buf), "%.3f", energy);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_ENERGY, buf, 0, 1, 0);
-            
-            snprintf(buf, sizeof(buf), "%.1f", frequency);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_FREQ, buf, 0, 1, 0);
-            
-            snprintf(buf, sizeof(buf), "%.2f", pf);
-            esp_mqtt_client_publish(s_client, TOPIC_PWR_PF, buf, 0, 1, 0);
+            char payload[256];
+            snprintf(payload, sizeof(payload),
+                "{\"voltage\":%.1f,\"current\":%.3f,"
+                "\"power\":%.1f,\"energy\":%.0f,"
+                "\"frequency\":%.1f,\"power_factor\":%.2f,"
+                "\"status\":\"%s\"}",
+                voltage, current, power,
+                energy, frequency, pf,
+                s_relay_state ? "ON" : "OFF");
+                
+            esp_mqtt_client_publish(s_client, "tiny/telemetry", payload, 0, 0, 0);
 
-            ESP_LOGI(TAG, "PZEM: %.1fV %.3fA %.1fW %.3fkWh %.1fHz PF=%.2f",
-                     voltage, current, power, energy, frequency, pf);
+            ESP_LOGI(TAG, "PZEM JSON: %s", payload);
         } else {
             ESP_LOGW(TAG, "PZEM read failed");
         }
         
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
 
@@ -473,8 +438,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "MQTT Connected");
         /* Subscribe QoS 0 */
         esp_mqtt_client_subscribe(client, TOPIC_RELAY, 0);
-        esp_mqtt_client_subscribe(client, TOPIC_LED,   0);
-        ESP_LOGI(TAG, "Subscribed: %s, %s", TOPIC_RELAY, TOPIC_LED);
+        ESP_LOGI(TAG, "Subscribed: %s", TOPIC_RELAY);
         
         /* Publish current relay state immediately */
         relay_publish_state();
@@ -504,14 +468,27 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         bool is_led   = strcmp(topic, TOPIC_LED)   == 0;
 
         if (is_relay || is_led) {
+            /* Chống dội lệnh/spam từ App để bảo vệ phần cứng (tránh sụt áp/EMI gây crash) */
+            static uint32_t last_cmd_time = 0;
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+            if (now - last_cmd_time < 300) {
+                ESP_LOGW(TAG, "Command ignored (rate limited)");
+                return;
+            }
+            last_cmd_time = now;
+
             if (strcmp(payload, "ON") == 0) {
-                s_relay_state = true;
-                relay_set(true);
-                relay_publish_state();
+                if (!s_relay_state) {
+                    s_relay_state = true;
+                    relay_set(true);
+                    relay_publish_state();
+                }
             } else if (strcmp(payload, "OFF") == 0) {
-                s_relay_state = false;
-                relay_set(false);
-                relay_publish_state();
+                if (s_relay_state) {
+                    s_relay_state = false;
+                    relay_set(false);
+                    relay_publish_state();
+                }
             } else {
                 ESP_LOGW(TAG, "Unknown payload: %s", payload);
             }
@@ -560,6 +537,7 @@ void app_main(void)
 
     /* Touch switch */
     touch_gpio_init();
+    xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
 
     /* PZEM UART */
     uart_pzem_init();
@@ -573,6 +551,7 @@ void app_main(void)
     /* MQTT - will connect after WiFi is established */
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = CONFIG_BROKER_URL,
+        .network.reconnect_timeout_ms = 2000,
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     s_client = client;

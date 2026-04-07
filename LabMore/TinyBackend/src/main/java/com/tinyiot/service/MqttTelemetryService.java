@@ -1,5 +1,7 @@
 package com.tinyiot.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tinyiot.model.Device;
 import com.tinyiot.model.PzemReading;
 import com.tinyiot.model.RelayHistory;
@@ -19,20 +21,13 @@ import java.time.Instant;
 public class MqttTelemetryService {
 
     public static final String T_RELAY_STATE = "tiny/relay/state";
-    public static final String T_V = "tiny/power/voltage";
-    public static final String T_A = "tiny/power/current";
-    public static final String T_W = "tiny/power/watts";
-    public static final String T_E = "tiny/power/energy";
-    public static final String T_F = "tiny/power/frequency";
-    public static final String T_PF = "tiny/power/pf";
+    public static final String T_TELEMETRY = "tiny/telemetry";
 
     private final DeviceRepository deviceRepository;
     private final PzemReadingRepository pzemReadingRepository;
     private final RelayHistoryRepository relayHistoryRepository;
     private final TransactionTemplate tx;
-
-    private final Object partialLock = new Object();
-    private final PzemPartial partial = new PzemPartial();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MqttTelemetryService(
             DeviceRepository deviceRepository,
@@ -53,23 +48,11 @@ public class MqttTelemetryService {
         try {
             if (T_RELAY_STATE.equals(topic)) {
                 tx.executeWithoutResult(status -> handleRelayState(payload));
-            } else if (topic.startsWith("tiny/power/")) {
-                tx.executeWithoutResult(status -> handlePowerTopic(topic, payload));
+            } else if (T_TELEMETRY.equals(topic)) {
+                tx.executeWithoutResult(status -> handleTelemetry(payload));
             }
         } catch (Exception e) {
             log.warn("MQTT handle error topic={} msg={}", topic, e.getMessage());
-        }
-    }
-
-    @Scheduled(fixedDelay = 3000)
-    public void scheduledFlushPartial() {
-        synchronized (partialLock) {
-            if (!partial.hasAny()) {
-                return;
-            }
-            if (partial.isComplete() || partial.isStale(3000)) {
-                tx.executeWithoutResult(status -> flushPartialLocked());
-            }
         }
     }
 
@@ -96,112 +79,41 @@ public class MqttTelemetryService {
         relayHistoryRepository.save(rh);
     }
 
-    private void handlePowerTopic(String topic, String payload) {
+    private void handleTelemetry(String payload) {
         Device device = deviceRepository.findByReceivesGlobalMqttTrue().orElse(null);
         if (device == null) {
             return;
         }
-        double v = parseDouble(payload);
-        if (Double.isNaN(v)) {
-            return;
-        }
-        synchronized (partialLock) {
-            switch (topic) {
-                case T_V -> partial.voltage = v;
-                case T_A -> partial.current = v;
-                case T_W -> partial.power = v;
-                case T_E -> partial.energy = v;
-                case T_F -> partial.frequency = v;
-                case T_PF -> partial.powerFactor = v;
-                default -> {
-                    return;
+
+        try {
+            JsonNode json = objectMapper.readTree(payload);
+            
+            // Save PZEM Reading
+            PzemReading reading = PzemReading.builder()
+                    .device(device)
+                    .voltage(json.has("voltage") ? json.get("voltage").asDouble() : 0.0)
+                    .current(json.has("current") ? json.get("current").asDouble() : 0.0)
+                    .power(json.has("power") ? json.get("power").asDouble() : 0.0)
+                    .energy(json.has("energy") ? json.get("energy").asDouble() : 0.0)
+                    .frequency(json.has("frequency") ? json.get("frequency").asDouble() : 0.0)
+                    .powerFactor(json.has("power_factor") ? json.get("power_factor").asDouble() : 0.0)
+                    .build();
+            pzemReadingRepository.save(reading);
+
+            // Update Device Status if included
+            if (json.has("status")) {
+                String cmd = json.get("status").asText().toUpperCase();
+                if (cmd.equals("ON") || cmd.equals("OFF")) {
+                    device.setStatus(cmd);
                 }
             }
-            partial.touch();
-        }
 
-        device.setOnline(true);
-        device.setLastSeen(Instant.now());
-        deviceRepository.save(device);
+            device.setOnline(true);
+            device.setLastSeen(Instant.now());
+            deviceRepository.save(device);
 
-        boolean complete;
-        synchronized (partialLock) {
-            complete = partial.isComplete();
-        }
-        if (complete) {
-            tx.executeWithoutResult(status -> {
-                synchronized (partialLock) {
-                    flushPartialLocked();
-                }
-            });
-        }
-    }
-
-    private void flushPartialLocked() {
-        if (!partial.hasAny()) {
-            return;
-        }
-        Device device = deviceRepository.findByReceivesGlobalMqttTrue().orElse(null);
-        if (device == null) {
-            partial.reset();
-            return;
-        }
-        PzemReading reading = PzemReading.builder()
-                .device(device)
-                .voltage(partial.voltage)
-                .current(partial.current)
-                .power(partial.power)
-                .energy(partial.energy)
-                .frequency(partial.frequency)
-                .powerFactor(partial.powerFactor)
-                .build();
-        pzemReadingRepository.save(reading);
-        partial.reset();
-    }
-
-    private static double parseDouble(String payload) {
-        try {
-            return Double.parseDouble(payload != null ? payload.trim() : "NaN");
         } catch (Exception e) {
-            return Double.NaN;
-        }
-    }
-
-    private static final class PzemPartial {
-        Double voltage;
-        Double current;
-        Double power;
-        Double energy;
-        Double frequency;
-        Double powerFactor;
-        long lastUpdateMs = 0L;
-
-        void touch() {
-            lastUpdateMs = System.currentTimeMillis();
-        }
-
-        void reset() {
-            voltage = null;
-            current = null;
-            power = null;
-            energy = null;
-            frequency = null;
-            powerFactor = null;
-            lastUpdateMs = 0L;
-        }
-
-        boolean hasAny() {
-            return voltage != null || current != null || power != null
-                    || energy != null || frequency != null || powerFactor != null;
-        }
-
-        boolean isComplete() {
-            return voltage != null && current != null && power != null
-                    && energy != null && frequency != null && powerFactor != null;
-        }
-
-        boolean isStale(long maxAgeMs) {
-            return lastUpdateMs > 0 && (System.currentTimeMillis() - lastUpdateMs) > maxAgeMs;
+            log.warn("Failed to parse telemetry JSON: {}", e.getMessage());
         }
     }
 }
