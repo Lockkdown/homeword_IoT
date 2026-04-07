@@ -2,7 +2,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'sign_up_flow/step1_country_screen.dart';
+import '../services/api_service.dart';
+import '../services/device_manager.dart';
+import 'dashboard/main_dashboard_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -45,20 +47,44 @@ class _SignUpScreenState extends State<SignUpScreen>
   }
 
   Future<void> _handleSignUp() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    if (!_agreedToTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đồng ý điều khoản để tiếp tục')),
+      );
+      return;
+    }
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nhập email và mật khẩu')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
-    // Simulate loading 2s (UI demo only)
-    await Future.delayed(const Duration(milliseconds: 2500), () {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        
-        // Navigate to Step 1 Select Country
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => const Step1CountryScreen(),
-        ));
-      }
-    });
+    try {
+      // Username = email (backend accepts unique username; login bằng email)
+      final res = await ApiService().register(
+        username: email,
+        email: email,
+        password: password,
+      );
+      await ApiService().saveToken(res.token);
+      await DeviceManager().refreshFromBackendOrCache();
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainDashboardScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ApiService.messageFromError(e))),
+      );
+    }
   }
 
   @override

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:dio/dio.dart';
+import '../services/api_service.dart';
+import '../services/device_manager.dart';
 import 'dashboard/main_dashboard_screen.dart';
 import 'forgot_password_flow/forgot_password_screen.dart';
 
@@ -35,20 +38,48 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   Future<void> _handleSignIn() async {
-    // Hide keyboard
     FocusScope.of(context).unfocus();
-    
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nhập email và mật khẩu')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
-    
-    // Simulate network request
-    await Future.delayed(const Duration(milliseconds: 2500));
-    
-    if (mounted) {
+    try {
+      final res = await ApiService().login(username: email, password: password);
+      await ApiService().saveToken(res.token);
+      // Refresh device list từ backend (không block nếu fail)
+      await DeviceManager().refreshFromBackendOrCache().catchError((_) {});
+      if (!mounted) return;
       setState(() => _isLoading = false);
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainDashboardScreen()),
         (route) => false,
       );
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      final msg = ApiService.messageFromError(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      // Lọc lỗi MQTT ra khỏi màn hình đăng nhập
+      final msg = e.toString();
+      final isMqttError = msg.contains('connection errored') ||
+          msg.contains('no route to host') ||
+          msg.contains('cannot be solved by the library');
+      if (!isMqttError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ApiService.messageFromError(e))),
+        );
+      }
     }
   }
 

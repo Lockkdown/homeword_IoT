@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
@@ -39,8 +41,16 @@ class PowerMetrics extends ChangeNotifier {
 }
 
 class MqttService {
-  static const String _broker = '192.168.1.58';
-  static const int _port = 1883;
+  /// Broker host — `--dart-define=MQTT_HOST=192.168.x.x`
+  static const String _broker = String.fromEnvironment(
+    'MQTT_HOST',
+    defaultValue: '192.168.1.58',
+  );
+  /// EMQX broker port 1883 (same broker as ESP32)
+  static const int _port = int.fromEnvironment(
+    'MQTT_PORT',
+    defaultValue: 1883,
+  );
   static const String topicCommand = 'tiny/light/command';
   static const String topicBrightness = 'tiny/light/brightness';
 
@@ -57,6 +67,7 @@ class MqttService {
   static const String topicRelayState = 'tiny/relay/state';
 
   late final MqttServerClient _client;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage?>>>? _updatesSub;
   final ValueNotifier<bool> connectionStatus = ValueNotifier(false);
   final ValueNotifier<bool> relayState = ValueNotifier(false);
   final ValueNotifier<PowerMetrics> powerMetrics = ValueNotifier(PowerMetrics());
@@ -73,17 +84,23 @@ class MqttService {
     );
     _client.setProtocolV311();
     _client.keepAlivePeriod = 60;
-    _client.autoReconnect = true;
+    // autoReconnect tắt khi khởi tạo; bật sau khi connect thành công
+    // để tránh exception rò rỉ ra ngoài khi broker chưa sẵn sàng
+    _client.autoReconnect = false;
     _client.logging(on: false);
     _client.connectionMessage = MqttConnectMessage()
         .withClientIdentifier(_client.clientIdentifier)
         .startClean();
     _client.onConnected = _onConnected;
-    _client.onDisconnected = () => connectionStatus.value = false;
-    _client.onAutoReconnected = () {
-      connectionStatus.value = true;
-      _subscribeToTopics();
-    };
+    _client.onDisconnected = _onDisconnected;
+  }
+
+  void _onDisconnected() {
+    connectionStatus.value = false;
+    // Tự retry sau 5 giây nếu bị ngắt kết nối
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!isConnected) connect();
+    });
   }
 
   void _onConnected() {
@@ -103,8 +120,9 @@ class MqttService {
     // Subscribe relay state (retained)
     _client.subscribe(topicRelayState, MqttQos.atMostOnce);
 
-    // Listen for messages
-    _client.updates!.listen(_onMessage);
+    // Một listener duy nhất — mỗi lần reconnect tránh chồng listen
+    _updatesSub?.cancel();
+    _updatesSub = _client.updates!.listen(_onMessage);
   }
 
   void _onMessage(List<MqttReceivedMessage<MqttMessage?>> messages) {
@@ -133,8 +151,11 @@ class MqttService {
           powerMetrics.value.update(powerFactor: double.tryParse(value) ?? 0);
           break;
         case topicRelayState:
-          debugPrint('[MQTT RECEIVED] $topic => $value');
-          relayState.value = value == 'ON';
+          final on = value.trim().toUpperCase() == 'ON';
+          if (relayState.value != on) {
+            debugPrint('[MQTT RECEIVED] $topic => $value');
+            relayState.value = on;
+          }
           break;
       }
     }
@@ -151,21 +172,29 @@ class MqttService {
 
     try {
       debugPrint('[MQTT] Connecting to $_broker:$_port ...');
-      final status = await _client.connect();
-      final connected = status?.state == MqttConnectionState.connected;
+      final status = await _client.connect().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () {
+          debugPrint('[MQTT] Connect timeout');
+          return null;
+        },
+      );
+      final connected =
+          status?.state == MqttConnectionState.connected;
       connectionStatus.value = connected;
-      debugPrint('[MQTT] Connect result: ${status?.state} | returnCode: ${status?.returnCode}');
+      debugPrint(
+          '[MQTT] Connect result: ${status?.state} | returnCode: ${status?.returnCode}');
 
       if (!connected) {
-        _client.disconnect();
+        try { _client.disconnect(); } catch (_) {}
       }
 
       return connected;
-    } catch (e, st) {
-      debugPrint('[MQTT] Connect error: $e');
-      debugPrint('[MQTT] StackTrace: $st');
+    } catch (e) {
+      // Swallow mọi lỗi MQTT — không cho phép exception này rò rỉ lên UI
+      debugPrint('[MQTT] Connect error (suppressed): $e');
       connectionStatus.value = false;
-      _client.disconnect();
+      try { _client.disconnect(); } catch (_) {}
       return false;
     }
   }
@@ -203,6 +232,8 @@ class MqttService {
   }
 
   void dispose() {
+    _updatesSub?.cancel();
+    _updatesSub = null;
     _client.disconnect();
   }
 }

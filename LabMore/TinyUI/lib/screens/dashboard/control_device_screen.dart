@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import '../../services/api_service.dart';
 import '../../services/device_manager.dart';
 import '../../services/mqtt_service.dart';
 
@@ -25,6 +29,12 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
   double _brightness = 50.0;
   bool _isOn = false;
   final MqttService _mqttService = MqttService();
+  final ApiService _api = ApiService();
+
+  Timer? _telemetryTimer;
+  Timer? _relayPersistDebounce;
+  PzemReadingDto? _pzem;
+  List<RelayHistoryDto> _relayHistory = [];
 
   @override
   void initState() {
@@ -32,34 +42,76 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
     _tabController = TabController(length: 3, vsync: this);
     _isOn = widget.device.isOn;
     _brightness = 50.0;
-    
-    // MqttService is now a singleton
-    _mqttService.connect().then((_) {
-      // Force current UI to match mqttService state if already connected
-      if (mounted && _mqttService.isConnected) {
-        setState(() {
-          _isOn = _mqttService.relayState.value;
-        });
-      }
-    });
-    
+
+    // Lắng nghe relay state từ MQTT (công tắc vật lý ESP32 → UI)
     _mqttService.relayState.addListener(_onRelayStateChanged);
+
+    // Kết nối MQTT và đồng bộ trạng thái ngay khi vào màn hình
+    _connectAndSync();
+
+    if (widget.device.serverId != null) {
+      _loadTelemetry();
+      _telemetryTimer =
+          Timer.periodic(const Duration(seconds: 5), (_) => _loadTelemetry());
+    }
   }
 
-  void _onRelayStateChanged() {
-    if (mounted && _isOn != _mqttService.relayState.value) {
+  Future<void> _connectAndSync() async {
+    await _mqttService.connect();
+    if (!mounted) return;
+    // Đồng bộ trạng thái hiện tại từ MQTT cache
+    setState(() {
+      _isOn = _mqttService.relayState.value;
+    });
+    // Load trạng thái mới nhất từ API nếu có serverId
+    if (widget.device.serverId != null) {
+      try {
+        final h = await _api.relayHistory(widget.device.serverId!, limit: 1);
+        if (!mounted) return;
+        if (h.isNotEmpty) {
+          setState(() {
+            _isOn = h.first.command == 'ON';
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _loadTelemetry() async {
+    final sid = widget.device.serverId;
+    if (sid == null) return;
+    try {
+      final p = await _api.getPzemLatest(sid);
+      final h = await _api.relayHistory(sid, limit: 15);
+      if (!mounted) return;
       setState(() {
-        _isOn = _mqttService.relayState.value;
+        _pzem = p;
+        _relayHistory = h;
       });
-      // Update local storage status with explicit boolean instead of toggle
-      final deviceManager = DeviceManager();
-      final updatedDevice = widget.device.copyWith(isOn: _isOn);
-      deviceManager.updateDevice(updatedDevice);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  /// Gọi khi ESP32 publish tiny/relay/state (công tắc vật lý hoặc phản hồi lệnh).
+  /// Không gọi _loadTelemetry ở đây — mỗi lần ON/OFF là 2 HTTP; timer 5s đủ cho PZEM/history.
+  void _onRelayStateChanged() {
+    if (!mounted) return;
+    final newState = _mqttService.relayState.value;
+    if (_isOn != newState) {
+      setState(() => _isOn = newState);
+      _relayPersistDebounce?.cancel();
+      _relayPersistDebounce = Timer(const Duration(milliseconds: 400), () {
+        if (!mounted) return;
+        DeviceManager().updateDevice(widget.device.copyWith(isOn: newState));
+      });
     }
   }
 
   @override
   void dispose() {
+    _telemetryTimer?.cancel();
+    _relayPersistDebounce?.cancel();
     _mqttService.relayState.removeListener(_onRelayStateChanged);
     _tabController.dispose();
     super.dispose();
@@ -235,10 +287,84 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
   }
 
   Widget _buildWhiteTab() {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.device.serverId != null) ...[
+            Text(
+              'PZEM / Lịch sử relay',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: _textDark,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_pzem != null)
+              Card(
+                elevation: 0,
+                color: const Color(0xFFF5F5F5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _metricRow('U', '${_pzem!.voltage?.toStringAsFixed(1) ?? "—"} V'),
+                      _metricRow('I', '${_pzem!.current?.toStringAsFixed(3) ?? "—"} A'),
+                      _metricRow('P', '${_pzem!.power?.toStringAsFixed(1) ?? "—"} W'),
+                      _metricRow('E', '${_pzem!.energy?.toStringAsFixed(3) ?? "—"} kWh'),
+                      _metricRow('Hz', '${_pzem!.frequency?.toStringAsFixed(1) ?? "—"} Hz'),
+                      _metricRow('PF', _pzem!.powerFactor?.toStringAsFixed(2) ?? '—'),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Text(
+                'Chưa có dữ liệu PZEM (đợi thiết bị gửi MQTT).',
+                style: GoogleFonts.inter(fontSize: 14, color: _textGrey),
+              ),
+            const SizedBox(height: 16),
+            if (_relayHistory.isNotEmpty) ...[
+              Text(
+                'Relay gần đây',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: _textGrey,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._relayHistory.map(
+                (r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${r.command} · ${r.source}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _textDark,
+                        ),
+                      ),
+                      Text(
+                        r.timestamp ?? '',
+                        style: GoogleFonts.inter(fontSize: 11, color: _textGrey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ],
           // Color Temperature Arc (Decorative)
           SizedBox(
             height: 200,
@@ -289,9 +415,9 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
               ],
             ),
           ),
-          
-          const Spacer(),
-          
+
+          const SizedBox(height: 24),
+
           // Brightness Label
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -373,6 +499,37 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
     );
   }
 
+  Widget _metricRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 36,
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _textGrey,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: _textDark,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildColorTab() {
     return Center(
       child: Text(
@@ -398,36 +555,46 @@ class _ControlDeviceScreenState extends State<ControlDeviceScreen>
   }
 
   void _toggleDevice(bool value) async {
-    debugPrint('[TOGGLE] Switch tapped => $value');
-    debugPrint('[MQTT] connected=${_mqttService.isConnected}');
-    setState(() {
-      _isOn = value;
-    });
-    
-    // Gửi lệnh MQTT
-    final success = await _mqttService.publishRelayCommand(value);
-    debugPrint('[TOGGLE] publishRelayCommand result=$success');
+    // Cập nhật UI ngay lập tức (optimistic update)
+    setState(() => _isOn = value);
 
-    if (!mounted) return;
+    final cmd = value ? 'ON' : 'OFF';
 
-    if (success) {
-      // Thành công => update local memory
-      final deviceManager = DeviceManager();
-      deviceManager.toggleDevice(widget.device.id);
-    } else {
-      // Thất bại => Trả lại UI cũ và báo lỗi
-      setState(() {
-        _isOn = !value;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to send command. Check MQTT Connection.',
-            style: GoogleFonts.inter(fontSize: 14),
+    if (widget.device.serverId != null) {
+      // Gọi API → backend publish MQTT → ESP32 nhận → ESP32 publish relay/state
+      // → Flutter MQTT listener tự cập nhật UI qua _onRelayStateChanged
+      try {
+        await _api.controlDevice(serverId: widget.device.serverId!, command: cmd);
+        await DeviceManager().updateDevice(widget.device.copyWith(isOn: value));
+        // Bỏ await _loadTelemetry — giảm cảm giác lag; timer định kỳ vẫn cập nhật
+      } catch (e) {
+        if (!mounted) return;
+        // Rollback UI nếu API lỗi
+        setState(() => _isOn = !value);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ApiService.messageFromError(e)),
+            backgroundColor: Colors.red,
           ),
-          backgroundColor: Colors.red,
-        ),
-      );
+        );
+      }
+    } else {
+      // Không có serverId: publish MQTT trực tiếp
+      final ok = await _mqttService.publishRelayCommand(value);
+      if (!ok && mounted) {
+        setState(() => _isOn = !value);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Không gửi được lệnh MQTT. Kiểm tra kết nối.',
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else if (ok) {
+        await DeviceManager().updateDevice(widget.device.copyWith(isOn: value));
+      }
     }
   }
 

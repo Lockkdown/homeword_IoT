@@ -7,6 +7,7 @@ import 'chatbot_screen.dart';
 import 'notification_screen.dart';
 import 'voice_assistant_screen.dart';
 import '../../services/device_manager.dart';
+import '../../services/mqtt_service.dart';
 import 'control_device_screen.dart';
 
 class MainDashboardScreen extends StatefulWidget {
@@ -37,6 +38,18 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
   void initState() {
     super.initState();
     _deviceManager.init();
+    // Connect MQTT sau khi đã đăng nhập thành công
+    // Tách biệt với login để MQTT error không ảnh hưởng login
+    _connectMqttSilently();
+  }
+
+  void _connectMqttSilently() {
+    // Fire-and-forget: không await, không throw
+    MqttService().connect().then((connected) {
+      debugPrint('[Dashboard] MQTT connected: $connected');
+    }).catchError((e) {
+      debugPrint('[Dashboard] MQTT connect failed (suppressed): $e');
+    });
   }
 
   void _navigateToAddDevice() {

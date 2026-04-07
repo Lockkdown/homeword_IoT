@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/splash_screen.dart';
-import 'services/mqtt_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,11 +11,7 @@ void main() {
       statusBarIconBrightness: Brightness.light,
     ),
   );
-  
-  // Initialize MQTT service
-  final mqttService = MqttService();
-  mqttService.connect();
-  
+  // MQTT sẽ connect sau khi user đăng nhập thành công (trong dashboard)
   runApp(const MyApp());
 }
 

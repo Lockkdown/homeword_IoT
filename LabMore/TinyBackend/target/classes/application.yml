@@ -1,0 +1,28 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/tinyiot
+    username: tinyiot
+    password: tinyiot123
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-init-sql: "SET TIME ZONE 'UTC'"
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+jwt:
+  secret: "tinyiot-dev-secret-key-change-me-in-production-min-32-chars!!"
+  expiration-ms: 86400000
+
+mqtt:
+  broker-url: tcp://localhost:1883
+  client-id: tiny-backend
+  username: ""
+  password: ""

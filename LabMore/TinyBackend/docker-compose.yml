@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: tinyiot-postgres
+    environment:
+      POSTGRES_USER: tinyiot
+      POSTGRES_PASSWORD: tinyiot123
+      POSTGRES_DB: tinyiot
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinyiot -d tinyiot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: tinyiot-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@tinyiot.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin-servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    links:
+      - postgres
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: tinyiot-mosquitto
+    ports:
+      - "1884:1883"
+      - "9002:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+volumes:
+  postgres_data:
+  pgadmin_data:
