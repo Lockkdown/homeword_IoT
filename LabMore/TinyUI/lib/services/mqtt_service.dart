@@ -39,7 +39,7 @@ class PowerMetrics extends ChangeNotifier {
 }
 
 class MqttService {
-  static const String _broker = '10.193.22.184';
+  static const String _broker = '192.168.1.58';
   static const int _port = 1883;
   static const String topicCommand = 'tiny/light/command';
   static const String topicBrightness = 'tiny/light/brightness';
@@ -61,7 +61,11 @@ class MqttService {
   final ValueNotifier<bool> relayState = ValueNotifier(false);
   final ValueNotifier<PowerMetrics> powerMetrics = ValueNotifier(PowerMetrics());
 
-  MqttService() {
+  // Singleton pattern for MqttService
+  static final MqttService _instance = MqttService._internal();
+  factory MqttService() => _instance;
+  
+  MqttService._internal() {
     _client = MqttServerClient.withPort(
       _broker,
       'tiny_ui_${DateTime.now().millisecondsSinceEpoch}',
@@ -89,15 +93,15 @@ class MqttService {
 
   void _subscribeToTopics() {
     // Subscribe power topics
-    _client.subscribe(topicPowerVoltage, MqttQos.atLeastOnce);
-    _client.subscribe(topicPowerCurrent, MqttQos.atLeastOnce);
-    _client.subscribe(topicPowerWatts, MqttQos.atLeastOnce);
-    _client.subscribe(topicPowerEnergy, MqttQos.atLeastOnce);
-    _client.subscribe(topicPowerFreq, MqttQos.atLeastOnce);
-    _client.subscribe(topicPowerPf, MqttQos.atLeastOnce);
+    _client.subscribe(topicPowerVoltage, MqttQos.atMostOnce);
+    _client.subscribe(topicPowerCurrent, MqttQos.atMostOnce);
+    _client.subscribe(topicPowerWatts, MqttQos.atMostOnce);
+    _client.subscribe(topicPowerEnergy, MqttQos.atMostOnce);
+    _client.subscribe(topicPowerFreq, MqttQos.atMostOnce);
+    _client.subscribe(topicPowerPf, MqttQos.atMostOnce);
 
     // Subscribe relay state (retained)
-    _client.subscribe(topicRelayState, MqttQos.atLeastOnce);
+    _client.subscribe(topicRelayState, MqttQos.atMostOnce);
 
     // Listen for messages
     _client.updates!.listen(_onMessage);
@@ -129,6 +133,7 @@ class MqttService {
           powerMetrics.value.update(powerFactor: double.tryParse(value) ?? 0);
           break;
         case topicRelayState:
+          debugPrint('[MQTT RECEIVED] $topic => $value');
           relayState.value = value == 'ON';
           break;
       }
@@ -145,16 +150,20 @@ class MqttService {
     }
 
     try {
+      debugPrint('[MQTT] Connecting to $_broker:$_port ...');
       final status = await _client.connect();
       final connected = status?.state == MqttConnectionState.connected;
       connectionStatus.value = connected;
+      debugPrint('[MQTT] Connect result: ${status?.state} | returnCode: ${status?.returnCode}');
 
       if (!connected) {
         _client.disconnect();
       }
 
       return connected;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[MQTT] Connect error: $e');
+      debugPrint('[MQTT] StackTrace: $st');
       connectionStatus.value = false;
       _client.disconnect();
       return false;
@@ -189,7 +198,7 @@ class MqttService {
     }
 
     final builder = MqttClientPayloadBuilder()..addString(payload);
-    _client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
+    _client.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
     return true;
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/home_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'screens/splash_screen.dart';
 import 'services/mqtt_service.dart';
 
 void main() {
@@ -16,26 +17,35 @@ void main() {
   final mqttService = MqttService();
   mqttService.connect();
   
-  runApp(TinyUIApp(mqttService: mqttService));
+  runApp(const MyApp());
 }
 
-class TinyUIApp extends StatelessWidget {
-  final MqttService mqttService;
-
-  const TinyUIApp({super.key, required this.mqttService});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TinyUI',
+      title: 'Smartify',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF324539),
-          brightness: Brightness.dark,
-        ),
+        textTheme: GoogleFonts.interTextTheme(),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3D5AFE)),
       ),
-      home: HomeScreen(mqttService: mqttService),
+      builder: (context, child) {
+        return Center(
+          child: Container(
+            width: 430,
+            height: 932,
+            clipBehavior: Clip.antiAlias,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+            ),
+            child: child ?? const SizedBox(),
+          ),
+        );
+      },
+      home: const SplashScreen(),
     );
   }
 }
