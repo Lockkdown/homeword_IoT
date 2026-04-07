@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/mqtt_service.dart';
 import 'relay_control_screen.dart';
 import 'led_bulb_screen.dart';
-import 'light_control_screen.dart';
+import 'power_monitor_screen.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  final MqttService mqttService;
+
+  const HomeScreen({super.key, required this.mqttService});
 
   @override
   Widget build(BuildContext context) {
@@ -55,12 +58,39 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'ESP32  ·  GPIO 5  ·  MQTT Control',
+                      'ESP32  ·  GPIO 21  ·  MQTT Control',
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         color: Colors.white.withValues(alpha: 0.4),
                         letterSpacing: 0.2,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Connection status
+                    ValueListenableBuilder<bool>(
+                      valueListenable: mqttService.connectionStatus,
+                      builder: (context, connected, _) {
+                        return Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: connected ? Colors.green : Colors.red,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              connected ? 'MQTT Connected' : 'MQTT Disconnected',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: connected ? Colors.green : Colors.red,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -81,11 +111,37 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
 
-              // ── Card 1: Relay ─────────────────────
+              // ── Card 1: Power Monitor ─────────────
               Positioned(
                 left: 20,
                 right: 20,
                 top: 196,
+                child: _DeviceCard(
+                  icon: Icons.monitor_heart_rounded,
+                  iconColor: const Color(0xFF00BCD4),
+                  bgGradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF1E2A2F), Color(0xFF152025)],
+                  ),
+                  borderColor: const Color(0xFF00BCD4),
+                  title: 'Power Monitor',
+                  subtitle: 'Theo dõi điện áp, dòng điện\ncông suất từ PZEM-004T',
+                  badge: 'tiny/power/*',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PowerMonitorScreen(mqttService: mqttService),
+                    ),
+                  ),
+                ),
+              ),
+
+              // ── Card 2: Relay ─────────────────────
+              Positioned(
+                left: 20,
+                right: 20,
+                top: 388,
                 child: _DeviceCard(
                   icon: Icons.electrical_services_rounded,
                   iconColor: const Color(0xFF4CAF50),
@@ -101,17 +157,17 @@ class HomeScreen extends StatelessWidget {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const RelayControlScreen(),
+                      builder: (_) => RelayControlScreen(mqttService: mqttService),
                     ),
                   ),
                 ),
               ),
 
-              // ── Card 2: LED Bulb ──────────────────
+              // ── Card 3: LED Bulb ──────────────────
               Positioned(
                 left: 20,
                 right: 20,
-                top: 388,
+                top: 580,
                 child: _DeviceCard(
                   icon: Icons.lightbulb_rounded,
                   iconColor: const Color(0xFFFFC107),
@@ -128,67 +184,6 @@ class HomeScreen extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => const LedBulbScreen(),
-                    ),
-                  ),
-                ),
-              ),
-
-              // ── Divider ───────────────────────────
-              Positioned(
-                left: 28,
-                right: 28,
-                top: 582,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Divider(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'Classic',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: Colors.white.withValues(alpha: 0.25),
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── Card 3: Light (legacy) ────────────
-              Positioned(
-                left: 20,
-                right: 20,
-                top: 604,
-                child: _DeviceCard(
-                  icon: Icons.wb_incandescent_rounded,
-                  iconColor: const Color(0xFFB0BEC5),
-                  bgGradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      const Color(0xFF1E2A28),
-                      const Color(0xFF141E1C),
-                    ],
-                  ),
-                  borderColor: const Color(0xFF546E6A),
-                  title: 'Kitchen Light',
-                  subtitle: 'Điều khiển đèn LED\nvới slider brightness',
-                  badge: 'tiny/light/command',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LightControlScreen(),
                     ),
                   ),
                 ),

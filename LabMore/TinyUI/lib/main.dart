@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/home_screen.dart';
+import 'services/mqtt_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,11 +11,18 @@ void main() {
       statusBarIconBrightness: Brightness.light,
     ),
   );
-  runApp(const TinyUIApp());
+  
+  // Initialize MQTT service
+  final mqttService = MqttService();
+  mqttService.connect();
+  
+  runApp(TinyUIApp(mqttService: mqttService));
 }
 
 class TinyUIApp extends StatelessWidget {
-  const TinyUIApp({super.key});
+  final MqttService mqttService;
+
+  const TinyUIApp({super.key, required this.mqttService});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +35,7 @@ class TinyUIApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      home: const HomeScreen(),
+      home: HomeScreen(mqttService: mqttService),
     );
   }
 }
